@@ -1,8 +1,24 @@
 CC = clang++
-# Split into CFLAGS (compilation flags) and LDFLAGS (linker flags)
-CFLAGS = -g -I$(shell brew --prefix raylib)/include -I$(shell brew --prefix glm)/include -Iinclude
-LDFLAGS = -L$(shell brew --prefix raylib)/lib -lraylib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreAudio -framework CoreVideo
-TARGET = bin 
+CFLAGS = -g -std=c++17 -Iinclude
+LDFLAGS = -lraylib
+TARGET = bin
+
+# Detect operating system
+UNAME_S := $(shell uname -s)
+
+# Mac-specific settings
+ifeq ($(UNAME_S),Darwin)
+    # Use homebrew paths if available
+    BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix || echo "/usr/local")
+    CFLAGS += -I$(BREW_PREFIX)/include -I$(BREW_PREFIX)/include/raylib
+    LDFLAGS += -L$(BREW_PREFIX)/lib -framework OpenGL -framework Cocoa -framework IOKit -framework CoreAudio -framework CoreVideo
+endif
+
+# Linux-specific settings
+ifeq ($(UNAME_S),Linux)
+    CFLAGS += -I/usr/include -I/usr/local/include
+    LDFLAGS += -L/usr/lib -L/usr/local/lib -lGL -lm -lpthread -ldl -lrt -lX11
+endif
 
 # Use wildcard to get all .cpp files
 SOURCES = $(wildcard *.cpp)
@@ -15,10 +31,11 @@ all: $(TARGET)
 $(TARGET): $(OBJECTS)
 	$(CC) $^ -o $@ $(LDFLAGS)
 
-# Pattern rule for object files - use only CFLAGS here
+# Pattern rule for object files
 %.o: %.cpp
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 clean:
 	$(RM) $(TARGET) $(OBJECTS)
 
+.PHONY: all clean
