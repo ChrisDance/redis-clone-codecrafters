@@ -3,9 +3,6 @@
 #include <string>
 #include <memory>
 #include <vector>
-#include <mutex>
-#include <condition_variable>
-#include <atomic>
 
 class TCPSocket;
 class ServerState;
@@ -32,7 +29,7 @@ public:
 
     void handlePropagation(std::shared_ptr<TCPSocket> masterSocket);
 
-    std::string handleWait(int count, int timeout);
+    std::string handleWait(int count, int timeout, int clientId);
 
     void addReplica(std::shared_ptr<TCPSocket> socket);
 
@@ -43,7 +40,5 @@ public:
 private:
     ServerState *server;
     std::vector<Replica> replicas;
-    mutable std::mutex replicasMutex;
-    std::condition_variable ackReceived;
-    std::atomic<int> ackCount;
+    int ackCount; 
 };

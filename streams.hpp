@@ -2,10 +2,7 @@
 
 #include <array>
 #include <chrono>
-#include <condition_variable>
-#include <functional>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -37,19 +34,8 @@ public:
     const std::array<uint64_t, 2> &getFirst() const { return first; }
     const std::array<uint64_t, 2> &getLast() const { return last; }
 
-    void blockClient(std::condition_variable *cv)
-    {
-        blocked.push_back(cv);
-    }
-
-    void unblockClient(std::condition_variable *cv);
-
-    void notifyBlocked();
-
 private:
     std::array<uint64_t, 2> first;
     std::array<uint64_t, 2> last;
     std::vector<std::shared_ptr<StreamEntry>> entries;
-    std::vector<std::condition_variable *> blocked;
-    std::mutex mutex;
 };

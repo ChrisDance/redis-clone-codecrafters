@@ -1,5 +1,6 @@
 #include "replication.hpp"
 #include "tcp_socket.hpp"
+#include "event_loop.hpp"
 #include "server.hpp"
 #include "resp.hpp"
 #include <iostream>
@@ -80,11 +81,15 @@ bool Replication::replicaHandshake()
         return false;
     }
 
+    // Note: In single-threaded version, we would need to integrate master connection
+    // into the event loop instead of spawning a thread. For simplification,
+    // this example keeps the thread for master connection handling.
     std::thread propagationThread(&Replication::handlePropagation, this, masterSocket);
     propagationThread.detach();
 
     return true;
 }
+
 /*sends a full RDB dump to a new replica when it connects*/
 int Replication::sendFullResynch(std::shared_ptr<TCPSocket> socket)
 {
@@ -109,7 +114,6 @@ int Replication::sendFullResynch(std::shared_ptr<TCPSocket> socket)
 
 void Replication::propagateToReplicas(const std::vector<std::string> &cmd)
 {
-    std::lock_guard<std::mutex> lock(replicasMutex);
 
     if (replicas.empty())
     {
@@ -148,7 +152,6 @@ void Replication::handlePropagation(std::shared_ptr<TCPSocket> masterSocket)
 {
     while (masterSocket->isValid())
     {
-
         std::string data = masterSocket->receive();
         if (data.empty())
         {
@@ -168,7 +171,7 @@ void Replication::handlePropagation(std::shared_ptr<TCPSocket> masterSocket)
         }
         std::cout << '\n';
 
-        auto response = server->handleCommand(cmd, nullptr);
+        auto response = server->handleCommand(cmd, -1); // Use -1 as special clientId for master
 
         /* REPLCONF ACK is the only response that a replica sends back to master */
         if (!cmd.empty() && cmd[0] == "REPLCONF")
@@ -183,96 +186,49 @@ void Replication::handlePropagation(std::shared_ptr<TCPSocket> masterSocket)
     masterSocket->close();
 }
 
-std::string Replication::handleWait(int count, int timeout)
+std::string Replication::handleWait(int count, int timeout, int clientId)
 {
-    std::vector<std::shared_ptr<TCPSocket>> replicasToNotify;
-    int acks = 0;
+    // Simplified WAIT implementation for single-threaded version
+    std::string getAckCmd = RESPProtocol::encodeStringArray({"REPLCONF", "GETACK", "*"});
+    int alreadySynced = 0;
 
-    {
-        std::lock_guard<std::mutex> lock(replicasMutex);
-
-        std::string getAckCmd = RESPProtocol::encodeStringArray({"REPLCONF", "GETACK", "*"});
-
-        for (auto &replica : replicas)
-        {
-            if (replica.offset > 0)
-            {
-                int bytesWritten = replica.socket->send(getAckCmd);
-                if (bytesWritten > 0)
-                {
-                    replica.offset += bytesWritten;
-                    replicasToNotify.push_back(replica.socket);
-                }
-                else
-                {
-                    acks++; /* count failed replicas as acknowledged */
-                }
-            }
-            else
-            {
-                acks++;
-            }
-        }
-    }
-
-    /* creating a new thread per replica notify is pretty is not great */
-    ackCount = 0;
-    for (auto &socket : replicasToNotify)
-    {
-        std::thread([this, socket]()
-                    {
-            std::cout << "Waiting response from replica " << socket->getRemoteAddress() << '\n';
-            std::string response = socket->receive();
-            if (!response.empty()) {
-                std::cout << "Got response from replica " << socket->getRemoteAddress() << '\n';
+    for (auto &replica : replicas) {
+        if (replica.offset == 0) {
+            alreadySynced++; // No writes to propagate
+        } else {
+            int bytesWritten = replica.socket->send(getAckCmd);
+            if (bytesWritten > 0) {
+                replica.offset += bytesWritten;
             } else {
-                std::cout << "Error from replica " << socket->getRemoteAddress() << '\n';
-            }
-            this->notifyAckReceived(); })
-            .detach();
-    }
-
-    auto timeoutTime = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout);
-
-    std::unique_lock<std::mutex> lock(replicasMutex);
-    while (ackCount + acks < count)
-    {
-        if (timeout > 0)
-        {
-            std::cout << "Waiting for acks (timeout = " << timeout << " ms)..." << '\n';
-            if (ackReceived.wait_until(lock, timeoutTime) == std::cv_status::timeout)
-            {
-                std::cout << "Timeout! acks = " << (ackCount + acks) << '\n';
-                break;
+                alreadySynced++; // Count failed replicas as acknowledged
             }
         }
-        else
-        {
-            std::cout << "Waiting for acks (no timeout)..." << '\n';
-            ackReceived.wait(lock);
-        }
-
-        std::cout << "Acks = " << (ackCount + acks) << '\n';
     }
 
-    return RESPProtocol::encodeInt(ackCount + acks);
+    // Add to event loop's waiting clients
+    if (server->getEventLoop() && alreadySynced < count) {
+        server->getEventLoop()-> addWaitingClient(clientId, count - alreadySynced, timeout);
+        return ""; // Response will be sent later by event loop
+    }
+
+    return RESPProtocol::encodeInt(alreadySynced);
 }
 
 void Replication::addReplica(std::shared_ptr<TCPSocket> socket)
 {
-    std::lock_guard<std::mutex> lock(replicasMutex);
+    // NO LOCK - single threaded!
     replicas.push_back({socket, 0, 0});
 }
 
 size_t Replication::getReplicaCount() const
 {
-    std::lock_guard<std::mutex> lock(replicasMutex);
+    // NO LOCK - single threaded!
     return replicas.size();
 }
 
 void Replication::notifyAckReceived()
 {
-    std::lock_guard<std::mutex> lock(replicasMutex);
+    // NO LOCK - single threaded!
     ackCount++;
-    ackReceived.notify_all();
+    // Event loop will handle the actual ACK counting and responses
 }

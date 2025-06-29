@@ -26,6 +26,7 @@ public:
     TCPSocket(TCPSocket &&) noexcept;
     TCPSocket &operator=(TCPSocket &&) noexcept;
 
+
     bool connect(const std::string &host, int port);
     bool bind(int port);
     bool listen(int backlog = 10);
@@ -48,9 +49,9 @@ public:
     void setBuffer(const std::string &buffer) { internalBuffer = buffer; }
     const std::string &getBuffer() const { return internalBuffer; }
     void clearBuffer() { internalBuffer.clear(); }
+    socket_t sock;
 
 private:
-    socket_t sock;
     std::string internalBuffer;
 };
 
@@ -71,6 +72,7 @@ public:
 
     bool isRunning() const;
     int getPort() const { return port; }
+    int getServerFd() const { return serverSocket ? serverSocket->sock: -1; }
 
 private:
     std::unique_ptr<TCPSocket> serverSocket;

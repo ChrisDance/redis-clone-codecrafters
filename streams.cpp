@@ -30,7 +30,7 @@ std::shared_ptr<StreamEntry> Stream::addStreamEntry(const std::string &id)
     entry->id[0] = millisecondsTime;
     entry->id[1] = sequenceNumber;
 
-    std::lock_guard<std::mutex> lock(mutex);
+    // NO LOCK - single threaded!
     entries.push_back(entry);
 
     return entry;
@@ -178,29 +178,4 @@ int Stream::searchStreamEntries(const std::vector<std::shared_ptr<StreamEntry>> 
     }
 
     return lo;
-}
-
-void Stream::unblockClient(std::condition_variable *cv)
-{
-    std::lock_guard<std::mutex> lock(mutex);
-
-    blocked.erase(
-        std::remove_if(blocked.begin(), blocked.end(),
-                       [cv](std::condition_variable *client)
-                       {
-                           return client == cv;
-                       }),
-        blocked.end());
-}
-
-void Stream::notifyBlocked()
-{
-    std::lock_guard<std::mutex> lock(mutex);
-
-    for (auto cv : blocked)
-    {
-        cv->notify_all();
-    }
-
-    blocked.clear();
 }

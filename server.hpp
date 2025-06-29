@@ -5,13 +5,9 @@
 #include <memory>
 #include <vector>
 #include <ctime>
-#include <atomic>
-#include <thread>
-#include <functional>
 
 class Stream;
-class TCPSocket;
-class TCPServer;
+class EventLoop;
 class Replication;
 
 struct ServerConfig
@@ -26,8 +22,6 @@ struct ServerConfig
     std::string dbfilename;
 };
 
-class ClientState;
-
 class ServerState
 {
 public:
@@ -39,12 +33,13 @@ public:
 
     void start();
 
-    std::string handleCommand(const std::vector<std::string> &cmd, ClientState *client);
+    std::string handleCommand(const std::vector<std::string> &cmd, int clientId);
 
     void incrementReplicaOffset(int amount) { replicaOffset += amount; }
 
     const ServerConfig &getConfig() const { return config; }
     Replication *getReplication() const { return replication.get(); }
+    EventLoop *getEventLoop() const { return eventLoop.get(); }
 
     std::string handleStreamAdd(const std::string &streamKey, const std::string &id,
                                 const std::vector<std::string> &pairs);
@@ -59,36 +54,10 @@ private:
     std::unordered_map<std::string, std::time_t> ttl;
     std::unordered_map<std::string, std::unique_ptr<Stream>> streams;
 
-    std::unique_ptr<TCPServer> server;
+    std::unique_ptr<EventLoop> eventLoop;
     std::unique_ptr<Replication> replication;
 
-    std::atomic<int> replicaOffset;
-
-    void serveClient(std::shared_ptr<TCPSocket> clientSocket, int clientId);
+    int replicaOffset; // No longer atomic since single-threaded
 
     bool loadRDBFile();
-};
-
-class ClientState
-{
-public:
-    ClientState(ServerState *server, int id, std::shared_ptr<TCPSocket> socket);
-
-    ClientState(const ClientState &) = delete;
-    ClientState &operator=(const ClientState &) = delete;
-
-    void serve();
-
-    int getId() const { return id; }
-    std::shared_ptr<TCPSocket> getSocket() const { return socket; }
-    ServerState *getServer() const { return server; }
-    bool &getMulti() { return multi; }
-    std::vector<std::vector<std::string>> &getQueue() { return queue; }
-
-private:
-    ServerState *server;
-    int id;
-    std::shared_ptr<TCPSocket> socket;
-    bool multi;
-    std::vector<std::vector<std::string>> queue;
 };
