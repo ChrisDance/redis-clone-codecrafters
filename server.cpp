@@ -26,28 +26,19 @@ ServerState::~ServerState()
 {
 }
 
-void ServerState::start()
-{
-    if (config.role == "slave")
-    {
-        if (!replication->replicaHandshake())
-        {
-            std::cerr << "Failed to connect to master server" << '\n';
-            return;
+// server.cpp - Updated to use single-threaded approach
+void ServerState::start() {
+    // Remove the old replication handshake - EventLoop handles it now
+
+    if (!config.dir.empty() && !config.dbfilename.empty()) {
+        if (!loadRDBFile()) {
+            std::cerr << "Warning: RDB file loading failed\n";
         }
     }
 
-    if (!config.dir.empty() && !config.dbfilename.empty())
-    {
-        if (!loadRDBFile())
-        {
-            std::cerr << "Warning: RDB file loading failed" << '\n';
-        }
-    }
+    std::cout << "Starting single-threaded server on port " << config.port << "\n";
 
-    std::cout << "Listening on port " << config.port << '\n';
-
-    // Start event loop (this blocks)
+    // EventLoop now handles both client connections AND master connection
     eventLoop->run();
 }
 

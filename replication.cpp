@@ -33,62 +33,7 @@ std::string Replication::generateReplicaId()
     return result;
 }
 
-bool Replication::replicaHandshake()
-{
-    auto &config = server->getConfig();
-    auto masterSocket = std::make_shared<TCPSocket>();
 
-    if (!masterSocket->connect(config.replicaofHost, config.replicaofPort))
-    {
-        std::cerr << "Failed to connect to master" << '\n';
-        return false;
-    }
-
-    /*handshake*/
-    std::vector<std::string> commands[] = {
-        {"PING"},
-        {"REPLCONF", "listening-port", std::to_string(config.port)},
-        {"REPLCONF", "capa", "psync2"},
-        {"PSYNC", "?", "-1"}};
-
-    for (const auto &cmd : commands)
-    {
-        masterSocket->send(RESPProtocol::encodeStringArray(cmd));
-        std::string response = masterSocket->readLine();
-        if (response.empty())
-        {
-            std::cerr << "No response from master during handshake" << '\n';
-            return false;
-        }
-        /* TODO: Check responses properly*/
-    }
-
-    /*receive RDB file ignoring it for now*/
-    std::string response = masterSocket->readLine();
-    if (response.empty() || response[0] != '$')
-    {
-        std::cerr << "Invalid response from master" << '\n';
-        return false;
-    }
-
-    int rdbSize = std::stoi(response.substr(1));
-    std::vector<char> buffer(rdbSize);
-    int receivedSize = masterSocket->receive(buffer.data(), rdbSize);
-
-    if (receivedSize != rdbSize)
-    {
-        std::cerr << "Size mismatch - got: " << receivedSize << ", want: " << rdbSize << '\n';
-        return false;
-    }
-
-    // Note: In single-threaded version, we would need to integrate master connection
-    // into the event loop instead of spawning a thread. For simplification,
-    // this example keeps the thread for master connection handling.
-    std::thread propagationThread(&Replication::handlePropagation, this, masterSocket);
-    propagationThread.detach();
-
-    return true;
-}
 
 /*sends a full RDB dump to a new replica when it connects*/
 int Replication::sendFullResynch(std::shared_ptr<TCPSocket> socket)
@@ -148,43 +93,7 @@ void Replication::propagateToReplicas(const std::vector<std::string> &cmd)
     }
 }
 
-void Replication::handlePropagation(std::shared_ptr<TCPSocket> masterSocket)
-{
-    while (masterSocket->isValid())
-    {
-        std::string data = masterSocket->receive();
-        if (data.empty())
-        {
-            break;
-        }
 
-        auto [cmd, cmdSize] = RESPProtocol::decodeStringArray(data);
-        if (cmd.empty())
-        {
-            break;
-        }
-
-        std::cout << "[from master] Command = ";
-        for (const auto &s : cmd)
-        {
-            std::cout << "\"" << s << "\" ";
-        }
-        std::cout << '\n';
-
-        auto response = server->handleCommand(cmd, -1); // Use -1 as special clientId for master
-
-        /* REPLCONF ACK is the only response that a replica sends back to master */
-        if (!cmd.empty() && cmd[0] == "REPLCONF")
-        {
-            masterSocket->send(response);
-        }
-
-        server->incrementReplicaOffset(cmdSize);
-    }
-
-    std::cout << "Master connection closed" << '\n';
-    masterSocket->close();
-}
 
 std::string Replication::handleWait(int count, int timeout, int clientId)
 {
